@@ -1,0 +1,35 @@
+cabal-version:      3.0
+name:               ptb-simulator
+version:            0.1.0.0
+synopsis:           Simulator for PTB rules proposed for ZakStunts
+-- description:
+homepage:           https://scr.stunts.hu
+license:            MIT
+license-file:       LICENSE
+author:             Daniel Mlot
+maintainer:         duplode_1@yahoo.com.br
+-- copyright:
+category:           Game
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+executable ptb-simulator
+    import:           warnings
+    main-is:          Main.hs
+    -- other-modules:
+    -- other-extensions:
+    build-depends:    base ^>=4.18.2.0
+                    , containers
+                    , sorted-list
+                    , bluefin
+                    , cassava
+                    , vector
+                    , text
+                    , bytestring
+                    , time
+    hs-source-dirs:   app
+    default-language: GHC2021
