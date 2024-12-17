@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
@@ -122,11 +123,13 @@ data PTBPos = PTB1st | PTB2nd | PTB3rd | PTB4th | PTB5th | PTB6th
     | PTBnth | PTBAbsent
     deriving (Eq, Ord, Show, Enum)
 
+-- Conversion from a one-based position.
 toPTBPos :: Int -> PTBPos
 toPTBPos n
     | n <= 6 = toEnum (n - 1)
     | otherwise = PTBnth
 
+-- Conversion to a one-based position.
 fromPTBPos :: PTBPos -> Maybe Int
 fromPTBPos = \case
     PTBnth -> Nothing
@@ -161,34 +164,105 @@ newPlayerState pos upd = PlayerState
     , playerLastUpdate = upd
     }
 
--- Credit earned for each hour in 1st place. Divide by ptbFactor to
--- convert to other positions. Ideally, this should be the least common
--- multiple of the possible factors, and additionally 60 if conversion
--- to minutes matter.
-creditPerLeadHour :: Int
-creditPerLeadHour = 120 * 13
+-- Ideally this would be something like a sized vector. The minutes are
+-- stored after being rounded down, which is why Int is used instead of
+-- NominalDiffTime.
+type MinutesCounter = Seq Int
 
-data CreditResolution = HRes | MinRes
+initialMinutesCounter :: MinutesCounter
+initialMinutesCounter = Seq.replicate 6 0
+
+getMinutesAt :: PTBPos -> MinutesCounter -> Int
+getMinutesAt pos counter = case pos of
+    PTBnth -> 0
+    PTBAbsent -> 0
+    _ -> counter `Seq.index` fromEnum pos
+
+addMinutesAt :: PTBPos -> Int -> MinutesCounter -> MinutesCounter
+addMinutesAt pos mins counter = case pos of
+    PTBnth -> counter
+    PTBAbsent -> counter
+    _ -> Seq.adjust' (mins +) (fromEnum pos) counter
+
+-- Resloution to round down earned time into credit.
+data CreditResolution = MinRes | HourRes | StuntsHourRes
     deriving (Eq, Show, Ord, Enum)
 
 -- Default resolution for assigning credit.
 chosenResolution :: CreditResolution
-chosenResolution = HRes -- MinRes
+chosenResolution = HourRes
 
--- Earned credit given a position and two consecutive update times.
--- The decisions about how to round earned hours materialise here.
-earnedCredit :: CreditResolution -> PTBPos -> LocalTime -> LocalTime -> Int
-earnedCredit res pos prevUpd currUpd = case ptbFactor pos of
-    -- fullHours `div` factor gives the stunts hours earned.
-    Just factor -> case res of
-        HRes -> (fullHours `div` factor) * creditPerLeadHour
-        MinRes -> (fullMinutes `div` factor) * (creditPerLeadHour `div` 60)
-    Nothing -> 0
+-- Earned real minutes given two consecutive update times.
+earnedMinutes :: LocalTime -> LocalTime -> Int
+earnedMinutes prevUpd currUpd = floor (secondsElapsed / 3600)
     where
     secondsElapsed = nominalDiffTimeToSeconds (diffLocalTime currUpd prevUpd)
-    -- This would be the place to add the ZakStunts 50 minutes rule.
-    fullHours = floor (secondsElapsed / 3600)
-    fullMinutes = floor (secondsElapsed / 60)
+
+-- Converts real minutes to stunts minutes. Stronger types here might be
+-- nice to have.
+toStuntsMinutes :: PTBPos -> Int -> Int
+toStuntsMinutes pos mins = case ptbFactor pos of
+    Just factor -> mins `div` factor
+    Nothing -> 0
+
+-- Converts real minutes to stunts hours, rounding down.
+toStuntsHours :: PTBPos -> Int -> Int
+toStuntsHours pos = (`div` 60) . toStuntsMinutes pos
+
+-- Credit earned for each hour in 1st place. Divide by ptbFactor to
+-- convert to other positions. Ideally, this should be the least common
+-- multiple of the possible factors and 60, assuming that conversion to
+-- minutes matters.
+creditPerLeadHour :: Int
+creditPerLeadHour = 120 * 13
+
+-- Credit earned for each minute in 1st place
+creditPerLeadMinute :: Int
+creditPerLeadMinute = creditPerLeadHour `div` 60
+
+-- Tally the credit for a minutes counter.
+counterToCredit :: CreditResolution -> MinutesCounter -> Int
+counterToCredit res counter = creditPerLeadMinute
+    * foldl' (\acc pos -> acc + refloor (stuntsMins pos)) 0 [PTB1st .. PTB6th]
+    where
+    stuntsMins pos = toStuntsMinutes pos (getMinutesAt pos counter)
+    -- Round to stunts hours if StuntsHourRes is being used.
+    refloor = case res of
+        MinRes -> id
+        HourRes -> id
+        StuntsHourRes -> (60 *) . (`div` 60)
+
+-- Earned credit given a position and two consecutive update times.
+-- Provided for debugging purposes.
+earnedCredit :: CreditResolution -> PTBPos -> LocalTime -> LocalTime -> Int
+earnedCredit res pos prevUpd currUpd = case res of
+    MinRes -> creditPerLeadMinute * toStuntsMinutes pos realMinutes
+    HourRes -> creditPerLeadMinute * toStuntsMinutes pos (60 * fullHours)
+    StuntsHourRes -> creditPerLeadHour * toStuntsHours pos realMinutes
+    where
+    realMinutes = earnedMinutes prevUpd currUpd
+    fullHours = realMinutes `div` 60
+
+-- The first sketch of an implementation for earnedCredit. A good
+-- illustration of the differences in rounding between HourRes and
+-- StuntsHourRes. Dividing hours by the factor before converting to
+-- credit discard quite a few more minutes:
+--
+-- (8 `div` 13) * 60 * creditPerLeadMinute = 0
+-- (60 * 8 `div` 13) * creditPerLeadMinute = 936
+earnedCredit' :: CreditResolution -> PTBPos -> LocalTime -> LocalTime -> Int
+earnedCredit' res pos prevUpd currUpd =
+    case ptbFactor pos of
+        -- fullHours `div` factor gives the stunts hours earned.
+        Just factor -> case res of
+            MinRes -> (fullMinutes `div` factor) * creditPerLeadMinute
+            HourRes -> (60 * fullMinutes `div` factor) * creditPerLeadHour
+            StuntsHourRes -> (fullHours `div` factor) * creditPerLeadHour
+        Nothing -> 0
+        where
+        secondsElapsed = nominalDiffTimeToSeconds (diffLocalTime currUpd prevUpd)
+        fullMinutes = floor (secondsElapsed / 60)
+        fullHours = floor (secondsElapsed / 3600)
 
 -- Credit for PTB +0.5. This is where changes to the point earning
 -- should be done.
