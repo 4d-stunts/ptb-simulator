@@ -233,38 +233,6 @@ counterToCredit res counter = creditPerLeadMinute
         HourRes -> id
         StuntsHourRes -> (60 *) . (`div` 60)
 
--- Earned credit given a position and two consecutive update times.
--- Provided for debugging purposes.
-earnedCredit :: CreditResolution -> PTBPos -> LocalTime -> LocalTime -> Int
-earnedCredit res pos prevUpd currUpd = case res of
-    MinRes -> creditPerLeadMinute * toStuntsMinutes pos realMinutes
-    HourRes -> creditPerLeadMinute * toStuntsMinutes pos (60 * fullHours)
-    StuntsHourRes -> creditPerLeadHour * toStuntsHours pos realMinutes
-    where
-    realMinutes = earnedMinutes prevUpd currUpd
-    fullHours = realMinutes `div` 60
-
--- The first sketch of an implementation for earnedCredit. A good
--- illustration of the differences in rounding between HourRes and
--- StuntsHourRes. Dividing hours by the factor before converting to
--- credit discard quite a few more minutes:
---
--- (8 `div` 13) * 60 * creditPerLeadMinute = 0
--- (60 * 8 `div` 13) * creditPerLeadMinute = 936
-earnedCredit' :: CreditResolution -> PTBPos -> LocalTime -> LocalTime -> Int
-earnedCredit' res pos prevUpd currUpd =
-    case ptbFactor pos of
-        -- fullHours `div` factor gives the stunts hours earned.
-        Just factor -> case res of
-            MinRes -> (fullMinutes `div` factor) * creditPerLeadMinute
-            HourRes -> (60 * fullMinutes `div` factor) * creditPerLeadHour
-            StuntsHourRes -> (fullHours `div` factor) * creditPerLeadHour
-        Nothing -> 0
-        where
-        secondsElapsed = nominalDiffTimeToSeconds (diffLocalTime currUpd prevUpd)
-        fullMinutes = floor (secondsElapsed / 60)
-        fullHours = floor (secondsElapsed / 3600)
-
 -- Credit for PTB +0.5. This is where changes to the point earning
 -- should be done.
 plusHalfThreshold :: Int
