@@ -148,25 +148,10 @@ ptbFactor = \case
     PTB6th -> Just 13
     _ -> Nothing
 
-data PlayerState = PlayerState
-    { playerPTBPos :: !PTBPos
-    , playerAddedCredit :: !Int
-    , playerCarryover :: !Int
-    , playerLastUpdate :: !LocalTime
-    }
-    deriving Show
-
-newPlayerState :: PTBPos -> LocalTime -> PlayerState
-newPlayerState pos upd = PlayerState
-    { playerPTBPos = pos
-    , playerAddedCredit = 0
-    , playerCarryover = 0
-    , playerLastUpdate = upd
-    }
-
 -- Ideally this would be something like a sized vector. The minutes are
--- stored after being rounded down, which is why Int is used instead of
--- NominalDiffTime.
+-- stored after being rounded down from seconds, which is why Int is
+-- used instead of NominalDiffTime. Note that any further rounding down
+-- to hours or stunts hours is not applied here.
 type MinutesCounter = Seq Int
 
 initialMinutesCounter :: MinutesCounter
@@ -184,7 +169,23 @@ addMinutesAt pos mins counter = case pos of
     PTBAbsent -> counter
     _ -> Seq.adjust' (mins +) (fromEnum pos) counter
 
--- Resloution to round down earned time into credit.
+data PlayerState = PlayerState
+    { playerPTBPos :: !PTBPos
+    , playerMinutes :: MinutesCounter
+    , playerCarryover :: !Int
+    , playerLastUpdate :: !LocalTime
+    }
+    deriving Show
+
+newPlayerState :: PTBPos -> LocalTime -> PlayerState
+newPlayerState pos upd = PlayerState
+    { playerPTBPos = pos
+    , playerMinutes = initialMinutesCounter
+    , playerCarryover = 0
+    , playerLastUpdate = upd
+    }
+
+-- Resolution to round down earned time into credit.
 data CreditResolution = MinRes | HourRes | StuntsHourRes
     deriving (Eq, Show, Ord, Enum)
 
@@ -194,7 +195,7 @@ chosenResolution = HourRes
 
 -- Earned real minutes given two consecutive update times.
 earnedMinutes :: LocalTime -> LocalTime -> Int
-earnedMinutes prevUpd currUpd = floor (secondsElapsed / 3600)
+earnedMinutes prevUpd currUpd = floor (secondsElapsed / 60)
     where
     secondsElapsed = nominalDiffTimeToSeconds (diffLocalTime currUpd prevUpd)
 
@@ -277,19 +278,20 @@ plusOneThreshold = plusHalfThreshold * 2
 plusTwoThreshold :: Int
 plusTwoThreshold = plusOneThreshold * 2
 
-nextRaceCarryover :: PlayerState -> Int
-nextRaceCarryover ps
+nextRaceCarryover :: CreditResolution -> PlayerState -> Int
+nextRaceCarryover res ps
     | totalCredit < plusHalfThreshold = totalCredit
     | totalCredit < plusOneThreshold = totalCredit - plusHalfThreshold
     | otherwise = 0
     where
-    totalCredit = playerAddedCredit ps + playerCarryover ps
+    totalCredit = addedCredit + playerCarryover ps
+    addedCredit = counterToCredit res (playerMinutes ps)
 
-nextRacePlayerState :: LocalTime -> PlayerState -> PlayerState
-nextRacePlayerState startTime ps = ps
+nextRacePlayerState :: CreditResolution -> LocalTime -> PlayerState -> PlayerState
+nextRacePlayerState res startTime ps = ps
     { playerPTBPos = PTBAbsent
-    , playerAddedCredit = 0
-    , playerCarryover = nextRaceCarryover ps
+    , playerMinutes = initialMinutesCounter
+    , playerCarryover = nextRaceCarryover res ps
     , playerLastUpdate = startTime
     }
 
@@ -302,6 +304,7 @@ processReplays
     -> Vector ReplayInfo
     -> Eff es ()
 processReplays rd_wnd wt_pss st_sb st_pss rpls = do
+    let res = chosenResolution
     for_ rpls $ \rpl -> do
         let trk = replayTrack rpl
         -- This assumes the track CSV has no missing tracks.
@@ -320,7 +323,8 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
                 pss <- get st_pss
                 tell wt_pss (Map.singleton trkOld pss)
                 -- Prepare the player states for the next race.
-                modify st_pss $ fmap (nextRacePlayerState (windowStart wnd))
+                modify st_pss $
+                    fmap (nextRacePlayerState res (windowStart wnd))
             -- Clear the scoreboard for the next race.
             put st_sb Scoreboard
                 { scoreboardTrack = trk
@@ -370,9 +374,9 @@ updatePlayerState st_pss updTime (nPos, rpl) = do
             in if playerPTBPos ps /= pos
                 then ps
                     { playerPTBPos = pos
-                    , playerAddedCredit = playerAddedCredit ps
-                        + earnedCredit chosenResolution
-                            prevPos (playerLastUpdate ps) updTime
+                    , playerMinutes = addMinutesAt prevPos
+                        (earnedMinutes (playerLastUpdate ps) updTime)
+                        (playerMinutes ps)
                     , playerLastUpdate = updTime
                     }
                 else ps)
@@ -390,9 +394,9 @@ refreshPlayerCredit st_pss updTime rpl = do
     -- A refresh only deals with players already included, thus adjust
     -- instead of alter
     modify st_pss $ Map.adjust (\ps -> ps
-            { playerAddedCredit = playerAddedCredit ps
-                + earnedCredit chosenResolution
-                    (playerPTBPos ps) (playerLastUpdate ps) updTime
+            { playerMinutes = addMinutesAt (playerPTBPos ps)
+                (earnedMinutes (playerLastUpdate ps) updTime)
+                (playerMinutes ps)
             , playerLastUpdate = updTime
             })
         player
