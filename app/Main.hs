@@ -270,7 +270,9 @@ creditToPoints :: Int -> Double
 creditToPoints credit = min 2 (fromIntegral wholePoints + fracPoints)
     where
     (wholePoints, remainder) = credit `divMod` plusOneThreshold
-    fracPoints = fromIntegral (remainder `div` plusHalfThreshold) / 2
+    fracPoints = case wholePoints of
+        0 -> fromIntegral (remainder `div` plusHalfThreshold) / 2
+        _ -> 0
 
 nextRaceCarryover :: CreditResolution -> PlayerState -> Int
 nextRaceCarryover res ps
