@@ -27,7 +27,7 @@ import Data.Ord
 import Data.List
 import Data.Foldable
 import Control.Monad
-import Debug.Trace
+import Data.Maybe
 
 data BonusWindow = BonusWindow
     { windowStart :: !LocalTime
@@ -136,8 +136,10 @@ fromPTBPos = \case
     PTBAbsent -> Nothing
     pos -> Just $! fromEnum pos + 1
 
+
 -- Conversion factor for real hours needed to earn credit, or "stunts
--- hours".
+-- hours". This function ultimately determines the range of positions
+-- considered in the PTB system.
 ptbFactor :: PTBPos -> Maybe Int
 ptbFactor = \case
     PTB1st -> Just 1
@@ -148,6 +150,11 @@ ptbFactor = \case
     PTB6th -> Just 13
     _ -> Nothing
 
+-- Highest PTB-earning position. For instance, it is 6 for a top 6 PTB
+-- system, and 1 for an LTB system.
+nPTB :: Int
+nPTB = length . dropWhileEnd isNothing $ ptbFactor <$> [minBound .. maxBound]
+
 -- Ideally this would be something like a sized vector. The minutes are
 -- stored after being rounded down from seconds, which is why Int is
 -- used instead of NominalDiffTime. Note that any further rounding down
@@ -155,7 +162,7 @@ ptbFactor = \case
 type MinutesCounter = Seq Int
 
 initialMinutesCounter :: MinutesCounter
-initialMinutesCounter = Seq.replicate 6 0
+initialMinutesCounter = Seq.replicate nPTB 0
 
 getMinutesAt :: PTBPos -> MinutesCounter -> Int
 getMinutesAt pos counter = case pos of
@@ -219,13 +226,9 @@ toStuntsMinutes pos mins = case ptbFactor pos of
 -- by ptbFactor to convert to other positions. The least common multiple
 -- of the possible factors and 60. For instance, if the possible factors
 -- are 1, 2, 3, 5, 8 and 13, creditPerLeadHour is 1560.
---
--- It is tempting to use [minBound..maxBound] for the list; however,
--- doing that would call for making the other places that assume a top 6
--- PTB adjustable, for the sake of consistency.
 creditPerLeadHour :: Int
-creditPerLeadHour = foldl' lcm 1
-    (maybe 1 id . ptbFactor <$> [PTB1st .. PTB6th])
+creditPerLeadHour = foldl' lcm 1 $
+    fromMaybe 1 . ptbFactor <$> [minBound .. maxBound]
 
 -- Credit earned for each stunts minute (real minute in 1st place).
 creditPerLeadMinute :: Int
@@ -315,17 +318,18 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
         -- submission time shifted forward.
         when (submittedOn rpl < quietDaysStart wnd) $ do
             modify st_sb $ addToScoreboard rpl
-            -- Top seven is the range subject to status changes on a top
-            -- 6 PTB system. Note that this means the state of the
-            -- players who occupy the seventh place will be tracked as
-            -- well, which though not particularly useful is tolerable.
-            updateTopN (max (submittedOn rpl) (windowStart wnd)) 7
+            -- For instance, assuming a top 6 PTB system, top seven is
+            -- the range subject to status changes. Note that this means
+            -- the state of the players who occupy the seventh place
+            -- will be tracked as well, which, though not particularly
+            -- useful, is tolerable.
+            updateTopN (max (submittedOn rpl) (windowStart wnd)) (nPTB + 1)
     -- Tally credit for final hours of final race. The duplication is
     -- needed because this update is otherwise only done before a track
     -- change.
     finalTrk <- scoreboardTrack <$> get st_sb
     finalWnd <- (Map.! finalTrk) <$> ask rd_wnd
-    refreshTopN (quietDaysStart finalWnd) 6
+    refreshTopN (quietDaysStart finalWnd) nPTB
     finalPss <- get st_pss
     tell wt_pss (Map.singleton finalTrk finalPss)
     where
@@ -393,5 +397,7 @@ main = do
                 st_pss <- newState source Map.empty
                 processReplays rd_wnd wt_pss st_sb st_pss rpls
                 -- get st_pss
+
+    -- print (nextRacePlayerState chosenResolution (read "2025-01-01 00:00:00") <$> foo Map.! "ZCT268")
     print (foo Map.! "ZCT269")
 
