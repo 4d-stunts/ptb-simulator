@@ -18,6 +18,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Data.Time
+import Data.Time.Format
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Sequence (Seq)
@@ -264,6 +265,13 @@ plusOneThreshold = plusHalfThreshold * 2
 plusTwoThreshold :: Int
 plusTwoThreshold = plusOneThreshold * 2
 
+-- Converts credit to points.
+creditToPoints :: Int -> Double
+creditToPoints credit = min 2 (fromIntegral wholePoints + fracPoints)
+    where
+    (wholePoints, remainder) = credit `divMod` plusOneThreshold
+    fracPoints = fromIntegral (remainder `div` plusHalfThreshold) / 2
+
 nextRaceCarryover :: CreditResolution -> PlayerState -> Int
 nextRaceCarryover res ps
     | totalCredit < plusHalfThreshold = totalCredit
@@ -390,6 +398,37 @@ refreshPlayerCredit st_pss updTime rpl = do
             })
         player
 
+formatMinutes :: Int -> String
+formatMinutes m = formatTime defaultTimeLocale "%h:%M"
+    (secondsToNominalDiffTime (60 * fromIntegral m))
+
+-- A display-oriented distillation of PlayerState.
+data PlayerSummary = PlayerSummary
+    { summaryMinutes :: MinutesCounter
+    , summaryPrevCarryover :: !Int
+    , summaryNextCarryover :: !Int
+    , summaryPoints :: !Double
+    }
+    deriving Show
+
+-- Add corresponding fields of summaries.
+addSummaries :: PlayerSummary -> PlayerSummary -> PlayerSummary
+addSummaries su1 su2 = PlayerSummary
+    { summaryMinutes = Seq.zipWith (+) (summaryMinutes su1) (summaryMinutes su2)
+    , summaryPrevCarryover = summaryPrevCarryover su1 + summaryPrevCarryover su2
+    , summaryNextCarryover = summaryNextCarryover su1 + summaryNextCarryover su2
+    , summaryPoints = summaryPoints su1 + summaryPoints su2
+    }
+
+toSummary :: CreditResolution -> PlayerState -> PlayerSummary
+toSummary res ps = PlayerSummary
+    { summaryMinutes = playerMinutes ps
+    , summaryPrevCarryover = playerCarryover ps
+    , summaryNextCarryover = nextRaceCarryover res ps
+    , summaryPoints = creditToPoints
+        (counterToCredit res (playerMinutes ps) + playerCarryover ps)
+    }
+
 main :: IO ()
 main = do
     rpls <- readAllReplays "data/results-2023.csv"
@@ -402,4 +441,15 @@ main = do
                 st_pss <- newState source Map.empty
                 processReplays rd_wnd wt_pss st_sb st_pss rpls
                 -- get st_pss
-    print (foo Map.! "ZCT269")
+    {-
+    print $
+        Map.filter ((0 <) . summaryPoints)
+        . fmap (toSummary chosenResolution)
+        $ foo Map.! "ZCT268"
+        -}
+    print $
+        sortBy (comparing (Down . summaryPoints . snd))
+        . Map.assocs
+        . foldl' (Map.unionWith addSummaries) Map.empty
+        . map (fmap (toSummary chosenResolution))
+        $ Map.elems foo
