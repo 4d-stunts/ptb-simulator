@@ -189,13 +189,18 @@ hasEarnings :: PlayerState -> Bool
 hasEarnings ps = any (/= 0) (playerMinutes ps)
     || playerCarryover ps /= 0
 
--- Resolution to round down earned time into credit.
-data CreditResolution = MinRes | HourRes | StuntsHourRes
+-- Resolution to round down earned time into credit. R is for real
+-- units, S is for stunts units.
+--
+-- Note that real minutes resolution would be awkward to have, as it
+-- would imply having to give credit for sub-minute intervals e.g. at
+-- the lead.
+data CreditResolution = SMinRes | RHourRes | SHourRes
     deriving (Eq, Show, Ord, Enum)
 
 -- Default resolution for assigning credit.
 chosenResolution :: CreditResolution
-chosenResolution = HourRes
+chosenResolution = SMinRes
 
 -- Earned real minutes given two consecutive update times.
 earnedMinutes :: LocalTime -> LocalTime -> Int
@@ -210,32 +215,27 @@ toStuntsMinutes pos mins = case ptbFactor pos of
     Just factor -> mins `div` factor
     Nothing -> 0
 
--- Converts real minutes to stunts hours, rounding down.
-toStuntsHours :: PTBPos -> Int -> Int
-toStuntsHours pos = (`div` 60) . toStuntsMinutes pos
-
--- Credit earned for each hour in 1st place. Divide by ptbFactor to
--- convert to other positions. Ideally, this should be the least common
--- multiple of the possible factors and 60, assuming that conversion to
--- minutes matters.
+-- Credit earned for each stunts hour (real hour in 1st place). Divide
+-- by ptbFactor to convert to other positions. Ideally, this should be
+-- the least common multiple of the possible factors and 60.
 creditPerLeadHour :: Int
 creditPerLeadHour = 120 * 13
 
--- Credit earned for each minute in 1st place
+-- Credit earned for each stunts minute (real minute in 1st place).
 creditPerLeadMinute :: Int
 creditPerLeadMinute = creditPerLeadHour `div` 60
 
 -- Tally the credit for a minutes counter.
 counterToCredit :: CreditResolution -> MinutesCounter -> Int
 counterToCredit res counter = creditPerLeadMinute
-    * foldl' (\acc pos -> acc + refloor (stuntsMins pos)) 0 [PTB1st .. PTB6th]
+    * foldl' (\acc pos -> acc + roundStuntsMins pos (getMinutesAt pos counter))
+        0 [PTB1st .. PTB6th]
     where
-    stuntsMins pos = toStuntsMinutes pos (getMinutesAt pos counter)
-    -- Round to stunts hours if StuntsHourRes is being used.
-    refloor = case res of
-        MinRes -> id
-        HourRes -> id
-        StuntsHourRes -> (60 *) . (`div` 60)
+    -- The different ways of rounding get applied here.
+    roundStuntsMins pos = case res of
+        SMinRes -> toStuntsMinutes pos
+        RHourRes -> toStuntsMinutes pos . (60 *) . (`div` 60)
+        SHourRes -> (60 *) . (`div` 60) . toStuntsMinutes pos
 
 -- Credit for PTB +0.5. This is where changes to the point earning
 -- should be done.
