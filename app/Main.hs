@@ -185,6 +185,10 @@ newPlayerState pos upd = PlayerState
     , playerLastUpdate = upd
     }
 
+hasEarnings :: PlayerState -> Bool
+hasEarnings ps = any (/= 0) (playerMinutes ps)
+    || playerCarryover ps /= 0
+
 -- Resolution to round down earned time into credit.
 data CreditResolution = MinRes | HourRes | StuntsHourRes
     deriving (Eq, Show, Ord, Enum)
@@ -287,6 +291,8 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
                 -- days.
                 wndOld <- (Map.! trkOld) <$> ask rd_wnd
                 refreshTopN (quietDaysStart wndOld) 6
+                -- Remove player states without earnings.
+                modify st_pss $ Map.filter hasEarnings
                 -- Report the player states at the start of quiet days.
                 pss <- get st_pss
                 tell wt_pss (Map.singleton trkOld pss)
