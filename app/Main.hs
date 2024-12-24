@@ -150,10 +150,15 @@ ptbFactor = \case
     PTB6th -> Just 13
     _ -> Nothing
 
+
+-- Range from first up to the lowest PTB earning position.
+ptbEarningRange :: [PTBPos]
+ptbEarningRange = dropWhileEnd (isNothing . ptbFactor) [minBound .. maxBound]
+
 -- Highest PTB-earning position. For instance, it is 6 for a top 6 PTB
 -- system, and 1 for an LTB system.
 nPTB :: Int
-nPTB = length . dropWhileEnd isNothing $ ptbFactor <$> [minBound .. maxBound]
+nPTB = length ptbEarningRange
 
 -- Ideally this would be something like a sized vector. The minutes are
 -- stored after being rounded down from seconds, which is why Int is
@@ -238,7 +243,7 @@ creditPerLeadMinute = creditPerLeadHour `div` 60
 counterToCredit :: CreditResolution -> MinutesCounter -> Int
 counterToCredit res counter = creditPerLeadMinute
     * foldl' (\acc pos -> acc + roundStuntsMins pos (getMinutesAt pos counter))
-        0 [PTB1st .. PTB6th]
+        0 ptbEarningRange
     where
     -- The different ways of rounding get applied here.
     roundStuntsMins pos = case res of
@@ -397,7 +402,4 @@ main = do
                 st_pss <- newState source Map.empty
                 processReplays rd_wnd wt_pss st_sb st_pss rpls
                 -- get st_pss
-
-    -- print (nextRacePlayerState chosenResolution (read "2025-01-01 00:00:00") <$> foo Map.! "ZCT268")
     print (foo Map.! "ZCT269")
-
