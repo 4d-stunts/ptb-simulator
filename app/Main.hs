@@ -121,7 +121,7 @@ sortedScoreboard = sortBy compareForScoreboard
 
 data PTBPos = PTB1st | PTB2nd | PTB3rd | PTB4th | PTB5th | PTB6th
     | PTBnth | PTBAbsent
-    deriving (Eq, Ord, Show, Enum)
+    deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- Conversion from a one-based position.
 toPTBPos :: Int -> PTBPos
@@ -216,10 +216,16 @@ toStuntsMinutes pos mins = case ptbFactor pos of
     Nothing -> 0
 
 -- Credit earned for each stunts hour (real hour in 1st place). Divide
--- by ptbFactor to convert to other positions. Ideally, this should be
--- the least common multiple of the possible factors and 60.
+-- by ptbFactor to convert to other positions. The least common multiple
+-- of the possible factors and 60. For instance, if the possible factors
+-- are 1, 2, 3, 5, 8 and 13, creditPerLeadHour is 1560.
+--
+-- It is tempting to use [minBound..maxBound] for the list; however,
+-- doing that would call for making the other places that assume a top 6
+-- PTB adjustable, for the sake of consistency.
 creditPerLeadHour :: Int
-creditPerLeadHour = 120 * 13
+creditPerLeadHour = foldl' lcm 1
+    (maybe 1 id . ptbFactor <$> [PTB1st .. PTB6th])
 
 -- Credit earned for each stunts minute (real minute in 1st place).
 creditPerLeadMinute :: Int
