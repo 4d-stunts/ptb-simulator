@@ -406,6 +406,7 @@ formatMinutes m = formatTime defaultTimeLocale "%h:%M"
 data PlayerSummary = PlayerSummary
     { summaryMinutes :: MinutesCounter
     , summaryPrevCarryover :: !Int
+    , summaryEarnedCredit :: !Int
     , summaryNextCarryover :: !Int
     , summaryPoints :: !Double
     }
@@ -416,6 +417,7 @@ addSummaries :: PlayerSummary -> PlayerSummary -> PlayerSummary
 addSummaries su1 su2 = PlayerSummary
     { summaryMinutes = Seq.zipWith (+) (summaryMinutes su1) (summaryMinutes su2)
     , summaryPrevCarryover = summaryPrevCarryover su1 + summaryPrevCarryover su2
+    , summaryEarnedCredit = summaryEarnedCredit su1 + summaryEarnedCredit su2
     , summaryNextCarryover = summaryNextCarryover su1 + summaryNextCarryover su2
     , summaryPoints = summaryPoints su1 + summaryPoints su2
     }
@@ -423,11 +425,55 @@ addSummaries su1 su2 = PlayerSummary
 toSummary :: CreditResolution -> PlayerState -> PlayerSummary
 toSummary res ps = PlayerSummary
     { summaryMinutes = playerMinutes ps
-    , summaryPrevCarryover = playerCarryover ps
+    , summaryPrevCarryover = broughtCarryover
+    , summaryEarnedCredit = earnedCredit
     , summaryNextCarryover = nextRaceCarryover res ps
-    , summaryPoints = creditToPoints
-        (counterToCredit res (playerMinutes ps) + playerCarryover ps)
+    , summaryPoints = creditToPoints (earnedCredit + broughtCarryover)
     }
+    where
+    earnedCredit = counterToCredit res (playerMinutes ps)
+    broughtCarryover = playerCarryover ps
+
+summariesToCsvRecords :: Map Track (Map Player PlayerSummary) -> [Csv.Record]
+summariesToCsvRecords =  map makeRecord
+    . concat . fmap sequenceA
+    . Map.assocs
+    . fmap (sortBy (comparing orderProjection) . Map.assocs)
+    where
+    orderProjection (_, ps) = Down
+        ( summaryPoints ps
+        , summaryNextCarryover ps
+        , summaryEarnedCredit ps
+        , summaryPrevCarryover ps
+        )
+
+    makeRecord (trk, (p, su)) = Csv.record $
+        [ Csv.toField trk
+        , Csv.toField p
+        , Csv.toField . formatMinutes $
+            summaryPrevCarryover su `div` creditPerLeadMinute
+        ]
+        ++ map (Csv.toField . formatMinutes) (toList $ summaryMinutes su)
+        ++
+        [ Csv.toField . formatMinutes $
+            summaryEarnedCredit su `div` creditPerLeadMinute
+        , Csv.toField . formatMinutes $
+            summaryNextCarryover su `div` creditPerLeadMinute
+        , Csv.toField (summaryPoints su)
+        ]
+
+summaryHeader :: Csv.Header
+summaryHeader = Csv.record . map Csv.toField $
+    [ "Track"
+    , "Racer"
+    , "Previous"
+    ]
+    ++ map show ptbEarningRange
+    ++
+    [ "Earned"
+    , "Next"
+    , "Points"
+    ]
 
 main :: IO ()
 main = do
@@ -447,9 +493,15 @@ main = do
         . fmap (toSummary chosenResolution)
         $ foo Map.! "ZCT268"
         -}
+    {-
     print $
         sortBy (comparing (Down . summaryPoints . snd))
         . Map.assocs
         . foldl' (Map.unionWith addSummaries) Map.empty
         . map (fmap (toSummary chosenResolution))
         $ Map.elems foo
+        -}
+    BL.writeFile "test.csv" . Csv.encode $
+        (summaryHeader :) . summariesToCsvRecords
+        . fmap (fmap (toSummary chosenResolution))
+        $ foo
