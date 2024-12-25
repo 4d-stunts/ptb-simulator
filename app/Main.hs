@@ -25,6 +25,7 @@ import Data.List
 import Data.Foldable
 import Control.Monad
 import Data.Maybe
+import System.Environment
 
 data BonusWindow = BonusWindow
     { windowStart :: !LocalTime
@@ -479,7 +480,9 @@ summaryHeader = Csv.record . map Csv.toField $
 
 main :: IO ()
 main = do
-    rpls <- readAllReplays "data/results-2023.csv"
+    rpls <- getArgs >>= readAllReplays . \case
+        path : _ -> path
+        [] -> "data/results-2023.csv"
     windows <- readBonusWindows "data/tracks.csv"
     let foo = runPureEff $
             execWriter $ \wt_pss ->
