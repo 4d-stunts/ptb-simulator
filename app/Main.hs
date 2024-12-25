@@ -305,7 +305,7 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
     for_ rpls $ \rpl -> do
         let trk = replayTrack rpl
         -- This assumes the track CSV has no missing tracks.
-        wnd <- (Map.! trk) <$> ask rd_wnd
+        wnd <- asks rd_wnd (Map.! trk)
         sbOld <- get st_sb
         let trkOld = scoreboardTrack sbOld
         -- Track switching (the input replays are assumed to be oredered
@@ -342,7 +342,7 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
     where
     wrapUpTrack trk = do
         -- Tally the remaining credit until the start of quiet days.
-        wnd <- (Map.! trk) <$> ask rd_wnd
+        wnd <- asks rd_wnd (Map.! trk)
         refreshTopN (quietDaysStart wnd)
         -- Remove player states without earnings.
         modify st_pss $ Map.filter hasEarnings
