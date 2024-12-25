@@ -333,7 +333,7 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
             -- the state of the players who occupy the seventh place
             -- will be tracked as well, which, though not particularly
             -- useful, is tolerable.
-            updateTopN (max (submittedOn rpl) (windowStart wnd)) (nPTB + 1)
+            updateTopN (max (submittedOn rpl) (windowStart wnd))
     -- Tally credit and report states at the end of the final race. The
     -- duplication is needed because this update is otherwise only done
     -- before a track change.
@@ -343,17 +343,17 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
     wrapUpTrack trk = do
         -- Tally the remaining credit until the start of quiet days.
         wnd <- (Map.! trk) <$> ask rd_wnd
-        refreshTopN (quietDaysStart wnd) nPTB
+        refreshTopN (quietDaysStart wnd)
         -- Remove player states without earnings.
         modify st_pss $ Map.filter hasEarnings
         -- Report the player states at the start of quiet days.
         pss <- get st_pss
         tell wt_pss (Map.singleton trk pss)
-    updateTopN updTime n = do
-        topN <- zip [1..] . take n . sortedScoreboard <$> get st_sb
+    updateTopN updTime = do
+        topN <- zip [1 .. nPTB + 1] . sortedScoreboard <$> get st_sb
         for_ topN $ updatePlayerState st_pss updTime
-    refreshTopN updTime n = do
-        topN <- take n . sortedScoreboard <$> get st_sb
+    refreshTopN updTime = do
+        topN <- take nPTB . sortedScoreboard <$> get st_sb
         for_ topN $ refreshPlayerCredit st_pss updTime
 
 -- Update player state given a potentially relevant change to the
