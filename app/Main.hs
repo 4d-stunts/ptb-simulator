@@ -252,14 +252,15 @@ counterToCredit res counter = creditPerLeadMinute
         RHourRes -> toStuntsMinutes pos . (60 *) . (`div` 60)
         SHourRes -> (60 *) . (`div` 60) . toStuntsMinutes pos
 
--- Credit for PTB +0.5. This is where changes to the point earning
--- should be done.
+-- Credit for PTB +0.5. To disable PTB +0.5, make it equal to
+-- plusOneThreshold.
 plusHalfThreshold :: Int
-plusHalfThreshold = creditPerLeadHour * 120
+plusHalfThreshold = plusOneThreshold `div` 2
 
--- Credit for PTB +1.
+-- Credit for PTB +1. This is where changes to the point earning
+-- should be done. An even number of hours multiplier is preferred.
 plusOneThreshold :: Int
-plusOneThreshold = plusHalfThreshold * 2
+plusOneThreshold = creditPerLeadHour * 240
 
 -- Credit for PTB +2.
 plusTwoThreshold :: Int
@@ -274,11 +275,16 @@ creditToPoints credit = min 2 (fromIntegral wholePoints + fracPoints)
         0 -> fromIntegral (remainder `div` plusHalfThreshold) / 2
         _ -> 0
 
+-- Calculates the credit carryover for the next race, accounting for
+-- the point assignments.
 nextRaceCarryover :: CreditResolution -> PlayerState -> Int
 nextRaceCarryover res ps
-    | totalCredit < plusHalfThreshold = totalCredit
-    | totalCredit < plusOneThreshold = totalCredit - plusHalfThreshold
-    | otherwise = 0
+    -- The order of the guards is such that if plusOneThreshold and
+    -- plusTwoThreshold are equal then the middle case becomes
+    -- impossible.
+    | totalCredit >= plusOneThreshold = 0
+    | totalCredit >= plusHalfThreshold = totalCredit - plusHalfThreshold
+    | otherwise = totalCredit
     where
     totalCredit = addedCredit + playerCarryover ps
     addedCredit = counterToCredit res (playerMinutes ps)
