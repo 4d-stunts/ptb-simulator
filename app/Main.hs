@@ -346,6 +346,7 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
     finalTrk <- scoreboardTrack <$> get st_sb
     finalWnd <- (Map.! finalTrk) <$> ask rd_wnd
     refreshTopN (quietDaysStart finalWnd) nPTB
+    modify st_pss $ Map.filter hasEarnings
     finalPss <- get st_pss
     tell wt_pss (Map.singleton finalTrk finalPss)
     where

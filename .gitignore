@@ -1,4 +1,4 @@
 dist-newstyle
-test.csv
+test*.csv
 runs
 *.ods#
