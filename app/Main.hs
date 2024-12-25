@@ -312,15 +312,9 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
         -- chronologically).
         when (trk /= trkOld) $ do
             when (isInitialised sbOld) $ do
-                -- Tally the remaining credit until the start of quiet
-                -- days.
-                wndOld <- (Map.! trkOld) <$> ask rd_wnd
-                refreshTopN (quietDaysStart wndOld) nPTB
-                -- Remove player states without earnings.
-                modify st_pss $ Map.filter hasEarnings
-                -- Report the player states at the start of quiet days.
-                pss <- get st_pss
-                tell wt_pss (Map.singleton trkOld pss)
+                -- Tally credit and report states at the end of the
+                -- race.
+                wrapUpTrack trkOld
                 -- Prepare the player states for the next race.
                 modify st_pss $
                     fmap (nextRacePlayerState res (windowStart wnd))
@@ -340,16 +334,21 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
             -- will be tracked as well, which, though not particularly
             -- useful, is tolerable.
             updateTopN (max (submittedOn rpl) (windowStart wnd)) (nPTB + 1)
-    -- Tally credit for final hours of final race. The duplication is
-    -- needed because this update is otherwise only done before a track
-    -- change.
+    -- Tally credit and report states at the end of the final race. The
+    -- duplication is needed because this update is otherwise only done
+    -- before a track change.
     finalTrk <- scoreboardTrack <$> get st_sb
-    finalWnd <- (Map.! finalTrk) <$> ask rd_wnd
-    refreshTopN (quietDaysStart finalWnd) nPTB
-    modify st_pss $ Map.filter hasEarnings
-    finalPss <- get st_pss
-    tell wt_pss (Map.singleton finalTrk finalPss)
+    wrapUpTrack finalTrk
     where
+    wrapUpTrack trk = do
+        -- Tally the remaining credit until the start of quiet days.
+        wnd <- (Map.! trk) <$> ask rd_wnd
+        refreshTopN (quietDaysStart wnd) nPTB
+        -- Remove player states without earnings.
+        modify st_pss $ Map.filter hasEarnings
+        -- Report the player states at the start of quiet days.
+        pss <- get st_pss
+        tell wt_pss (Map.singleton trk pss)
     updateTopN updTime n = do
         topN <- zip [1..] . take n . sortedScoreboard <$> get st_sb
         for_ topN $ updatePlayerState st_pss updTime
