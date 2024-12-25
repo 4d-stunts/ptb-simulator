@@ -229,7 +229,7 @@ toStuntsMinutes pos mins = case ptbFactor pos of
 -- are 1, 2, 3, 5, 8 and 13, creditPerLeadHour is 1560.
 creditPerLeadHour :: Int
 creditPerLeadHour = foldl' lcm 60 $
-    fromMaybe 1 . ptbFactor <$> [minBound .. maxBound]
+    max 1 . fromMaybe 1 . ptbFactor <$> [minBound .. maxBound]
 
 -- Credit earned for each stunts minute (real minute in 1st place).
 creditPerLeadMinute :: Int
