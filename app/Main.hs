@@ -315,7 +315,7 @@ processReplays rd_wnd wt_pss st_sb st_pss rpls = do
                 -- Tally the remaining credit until the start of quiet
                 -- days.
                 wndOld <- (Map.! trkOld) <$> ask rd_wnd
-                refreshTopN (quietDaysStart wndOld) 6
+                refreshTopN (quietDaysStart wndOld) nPTB
                 -- Remove player states without earnings.
                 modify st_pss $ Map.filter hasEarnings
                 -- Report the player states at the start of quiet days.
