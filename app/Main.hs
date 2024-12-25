@@ -9,16 +9,12 @@ import Bluefin.State
 import Bluefin.StateSource
 import Bluefin.Reader
 import Bluefin.Writer
-import Bluefin.IO
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Read as T
 import qualified Data.Csv as Csv
 import qualified Data.ByteString.Lazy as BL
 import Data.Vector (Vector)
-import qualified Data.Vector as V
 import Data.Time
-import Data.Time.Format
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Sequence (Seq)
@@ -137,7 +133,6 @@ fromPTBPos = \case
     PTBAbsent -> Nothing
     pos -> Just $! fromEnum pos + 1
 
-
 -- Conversion factor for real hours needed to earn credit, or "stunts
 -- hours". This function ultimately determines the range of positions
 -- considered in the PTB system.
@@ -150,7 +145,6 @@ ptbFactor = \case
     PTB5th -> Just 8
     PTB6th -> Just 13
     _ -> Nothing
-
 
 -- Range from first up to the lowest PTB earning position.
 ptbEarningRange :: [PTBPos]
