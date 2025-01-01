@@ -5,6 +5,7 @@
 module Main where
 
 import Bluefin.Eff
+import Bluefin.Compound
 import Bluefin.State
 import Bluefin.StateSource
 import Bluefin.Reader
@@ -292,15 +293,32 @@ nextRacePlayerState res startTime ps = ps
     , playerLastUpdate = startTime
     }
 
-processReplays
-    :: (rd_wnd :> es, wt_pss :> es, st_sb :> es, st_pss :> es)
-    => Reader (Map Track BonusWindow) rd_wnd
-    -> Writer (Map Track (Map Player PlayerState)) wt_pss
-    -> State Scoreboard st_sb
-    -> State (Map Player PlayerState) st_pss
-    -> Vector ReplayInfo
-    -> Eff es ()
-processReplays rd_wnd wt_pss st_sb st_pss rpls = do
+data Simulator e = Simulator
+    (Reader (Map Track BonusWindow) e)
+    (Writer (Map Track (Map Player PlayerState)) e)
+    (State Scoreboard e)
+    (State (Map Player PlayerState) e)
+
+-- Runs a simulation solely for the writer output (that is, the player
+-- states grouped by track).
+execSimulator
+    :: Map Track BonusWindow
+    -> (forall e. Simulator e -> Eff (e :& es) x)
+    -> Eff es (Map Track (Map Player PlayerState))
+execSimulator windows k =
+    execWriter $ \wt_pss ->
+    runReader windows $ \rd_wnd ->
+    withStateSource $ \source -> do
+        st_sb <- newState source initialScoreboard
+        st_pss <- newState source Map.empty
+        useImplIn k $ Simulator
+            (mapHandle rd_wnd)
+            (mapHandle wt_pss)
+            (mapHandle st_sb)
+            (mapHandle st_pss)
+
+processReplays :: e :> es => Vector ReplayInfo -> Simulator e -> Eff es ()
+processReplays rpls (Simulator rd_wnd wt_pss st_sb st_pss) = do
     let res = chosenResolution
     for_ rpls $ \rpl -> do
         let trk = replayTrack rpl
@@ -484,14 +502,7 @@ main = do
         path : _ -> path
         [] -> "data/results-2023.csv"
     windows <- readBonusWindows "data/tracks.csv"
-    let foo = runPureEff $
-            execWriter $ \wt_pss ->
-            runReader windows $ \rd_wnd ->
-            withStateSource $ \source -> do
-                st_sb <- newState source initialScoreboard
-                st_pss <- newState source Map.empty
-                processReplays rd_wnd wt_pss st_sb st_pss rpls
-                -- get st_pss
+    let foo = runPureEff $ execSimulator windows (processReplays rpls)
     {-
     print $
         Map.filter ((0 <) . summaryPoints)
