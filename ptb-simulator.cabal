@@ -24,7 +24,6 @@ executable ptb-simulator
     -- other-extensions:
     build-depends:    base ^>=4.18.2.0
                     , containers
-                    , sorted-list
                     , bluefin
                     , cassava
                     , vector
