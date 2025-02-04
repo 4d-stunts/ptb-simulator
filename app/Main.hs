@@ -1,5 +1,18 @@
-{-# OPTIONS_GHC -Wno-unused-imports #-}
-{-# LANGUAGE PartialTypeSignatures #-}
+#!/usr/bin/env cabal
+{- cabal:
+build-depends: base ^>= 4.18.2.0
+             , containers
+             , bluefin >= 0.0.14
+             , cassava
+             , vector
+             , text
+             , bytestring
+             , time
+default-language: GHC2021
+-}
+{- project:
+allow-newer: all:^base
+-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 module Main where
