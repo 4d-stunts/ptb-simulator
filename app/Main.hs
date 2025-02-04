@@ -297,10 +297,15 @@ plusHalfThreshold :: Int
 plusHalfThreshold = plusOneThreshold
     `div` (if grantPlusHalf then 2 else 1)
 
+-- Hours needed to earn PTB +1. An even value is preferred. This is the
+-- base parameter which determines the earning rate everywhere.
+hoursForPlusOne :: Int
+hoursForPlusOne = 264
+
 -- Credit for PTB +1. This is where changes to the point earning
 -- should be done. An even number of hours multiplier is preferred.
 plusOneThreshold :: Int
-plusOneThreshold = creditPerLeadHour * 264
+plusOneThreshold = creditPerLeadHour * hoursForPlusOne
 
 -- Credit for PTB +2.
 plusTwoThreshold :: Int
