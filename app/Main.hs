@@ -28,32 +28,43 @@ import Control.Monad
 import Data.Maybe
 import System.Environment
 
+-- The window in a race within which replays count for PTB.
 data BonusWindow = BonusWindow
     { windowStart :: !LocalTime
     , quietDaysStart :: !LocalTime
     }
     deriving Show
 
+-- Player identifier. Just a synonym of Text for now.
+type Player = Text
+
+-- Track identifier. Just a synonym of Text for now.
+type Track = Text
+
+-- Sets up bonus windows from a CSV with fields:
+-- track name, season, official start day, deadline day.
+-- Note that the season field is unused for now. Quiet days are assumed
+-- to begin two days before the deadline.
 readBonusWindows
     :: FilePath
-    -> IO (Map Text BonusWindow)
+    -> IO (Map Track BonusWindow)
 readBonusWindows csvPath = do
     csvData <- BL.readFile csvPath
     pure $ case Csv.decode Csv.HasHeader csvData of
-        Left err -> error err  -- throw ex err
+        Left err -> error err
         Right v -> v & foldl'
             (\ws (name, _ :: String, start, end) ->
                 Map.insert name BonusWindow
                     { windowStart = LocalTime (read start) midnight
+                    -- Subtracting one day from 00:00 at the deadline
+                    -- gives 00:00 at the beginning of quiet days.
                     , quietDaysStart = addLocalTime (-nominalDay)
                         (LocalTime (read end) midnight)
                     }
                     ws)
             Map.empty
 
-type Player = Text
-type Track = Text
-
+-- Relevant information about a replay.
 data ReplayInfo = ReplayInfo
     { replayTrack :: !Track
     , replayPlayer :: !Player
@@ -63,17 +74,20 @@ data ReplayInfo = ReplayInfo
     }
     deriving Show
 
+-- Compares replays according to lap time, using submission time as
+-- tiebreaker.
 compareForScoreboard :: ReplayInfo -> ReplayInfo -> Ordering
 compareForScoreboard rix riy =
     comparing correctedHsec rix riy <> comparing submittedOn rix riy
 
+-- Reads replays from a CSV with fields matching those of ReplayInfo.
 readAllReplays
     :: FilePath
     -> IO (Vector ReplayInfo)
 readAllReplays csvPath = do
     csvData <- BL.readFile csvPath
     pure $ case Csv.decode Csv.HasHeader csvData of
-        Left err -> error err  -- throw ex err
+        Left err -> error err
         Right v -> v & fmap (\(track, name, hsec, sbmtOn, vis) ->
             ReplayInfo
                 { replayTrack = track
@@ -83,6 +97,8 @@ readAllReplays csvPath = do
                 , visibility = vis
                 })
 
+-- An unsorted scoreboard for a specific race, with the current replay
+-- for each racer partaking in it.
 data Scoreboard = Scoreboard
     { scoreboardTrack :: !Track
     , scoreboardEntries :: Map Player ReplayInfo
@@ -97,6 +113,8 @@ initialScoreboard = Scoreboard
     , scoreboardEntries = Map.empty
     }
 
+-- Checks whether a scoreboard has been initialised. This is just a
+-- hacky way of not needing a Maybe Scoreboard for the scoreboard state.
 isInitialised :: Scoreboard -> Bool
 isInitialised = not . T.null . scoreboardTrack
 
@@ -114,24 +132,29 @@ addToScoreboard rplNew sb = sb
             (replayPlayer rplNew)
     }
 
+-- Extracts a sorted list of replays from an unsorted Scoreboard.
 sortedScoreboard :: Scoreboard -> [ReplayInfo]
 sortedScoreboard = sortBy compareForScoreboard
     . Map.elems . scoreboardEntries
 
+-- An enumeration of scoreboard positions for the purposes of PTB.
+-- PTBNth means seventh or lower, and PTBAbsent means currently not in
+-- the race.
 data PTBPos = PTB1st | PTB2nd | PTB3rd | PTB4th | PTB5th | PTB6th
-    | PTBnth | PTBAbsent
+    | PTBNth | PTBAbsent
     deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- Conversion from a one-based position.
 toPTBPos :: Int -> PTBPos
 toPTBPos n
     | n <= 6 = toEnum (n - 1)
-    | otherwise = PTBnth
+    | otherwise = PTBNth
 
--- Conversion to a one-based position.
+-- Conversion to a one-based position. Use fromEnum to convert to a
+-- zero-based index.
 fromPTBPos :: PTBPos -> Maybe Int
 fromPTBPos = \case
-    PTBnth -> Nothing
+    PTBNth -> Nothing
     PTBAbsent -> Nothing
     pos -> Just $! fromEnum pos + 1
 
@@ -157,6 +180,8 @@ ptbEarningRange = dropWhileEnd (isNothing . ptbFactor) [minBound .. maxBound]
 nPTB :: Int
 nPTB = length ptbEarningRange
 
+-- Stores minutes spent in each position within ptbEarningRange.
+--
 -- Ideally this would be something like a sized vector. The minutes are
 -- stored after being rounded down from seconds, which is why Int is
 -- used instead of NominalDiffTime. Note that any further rounding down
@@ -166,18 +191,21 @@ type MinutesCounter = Seq Int
 initialMinutesCounter :: MinutesCounter
 initialMinutesCounter = Seq.replicate nPTB 0
 
+-- Get minutes from a counter at the position given by a PTBPos.
 getMinutesAt :: PTBPos -> MinutesCounter -> Int
 getMinutesAt pos counter = case pos of
-    PTBnth -> 0
+    PTBNth -> 0
     PTBAbsent -> 0
     _ -> counter `Seq.index` fromEnum pos
 
+-- Add minutes to a counter at the position given by a PTBPos.
 addMinutesAt :: PTBPos -> Int -> MinutesCounter -> MinutesCounter
 addMinutesAt pos mins counter = case pos of
-    PTBnth -> counter
+    PTBNth -> counter
     PTBAbsent -> counter
     _ -> Seq.adjust' (mins +) (fromEnum pos) counter
 
+-- Player data as it evolves during a race.
 data PlayerState = PlayerState
     { playerPTBPos :: !PTBPos
     , playerMinutes :: MinutesCounter
@@ -186,6 +214,8 @@ data PlayerState = PlayerState
     }
     deriving Show
 
+-- PlayerState for a player whose state wasn't been tracked before the
+-- current replay.
 newPlayerState :: PTBPos -> LocalTime -> PlayerState
 newPlayerState pos upd = PlayerState
     { playerPTBPos = pos
@@ -194,6 +224,8 @@ newPlayerState pos upd = PlayerState
     , playerLastUpdate = upd
     }
 
+-- Checks whether a player has anything that merits reporting, that is,
+-- either minutes in PTB positions or carryover from past races.
 hasEarnings :: PlayerState -> Bool
 hasEarnings ps = any (/= 0) (playerMinutes ps)
     || playerCarryover ps /= 0
@@ -285,6 +317,8 @@ nextRaceCarryover res ps
     totalCredit = addedCredit + playerCarryover ps
     addedCredit = counterToCredit res (playerMinutes ps)
 
+-- Prepares a PlayerState for the next race. Carryover is calculated
+-- here, based on the state at the end of the previous race.
 nextRacePlayerState :: CreditResolution -> LocalTime -> PlayerState -> PlayerState
 nextRacePlayerState res startTime ps = ps
     { playerPTBPos = PTBAbsent
@@ -293,6 +327,12 @@ nextRacePlayerState res startTime ps = ps
     , playerLastUpdate = startTime
     }
 
+-- The "simulator" effect, which covers:
+--
+-- - Read-only track information (for now, just the bonus windows);
+-- - As output, the PlayerStates at the end of each race;
+-- - As updatable state, the unsorted scoreboard for the current race.
+-- - Also as updatable state, the PlayerStates during the current race.
 data Simulator e = Simulator
     (Reader (Map Track BonusWindow) e)
     (Writer (Map Track (Map Player PlayerState)) e)
@@ -317,6 +357,7 @@ execSimulator windows k =
             (mapHandle st_sb)
             (mapHandle st_pss)
 
+-- The main loop.
 processReplays :: e :> es => Vector ReplayInfo -> Simulator e -> Eff es ()
 processReplays rpls (Simulator rd_wnd wt_pss st_sb st_pss) = do
     let res = chosenResolution
@@ -419,10 +460,6 @@ refreshPlayerCredit st_pss updTime rpl = do
             })
         player
 
-formatMinutes :: Int -> String
-formatMinutes m = formatTime defaultTimeLocale "%h:%M"
-    (secondsToNominalDiffTime (60 * fromIntegral m))
-
 -- A display-oriented distillation of PlayerState.
 data PlayerSummary = PlayerSummary
     { summaryMinutes :: MinutesCounter
@@ -443,6 +480,7 @@ addSummaries su1 su2 = PlayerSummary
     , summaryPoints = summaryPoints su1 + summaryPoints su2
     }
 
+-- Converts a PlayerState to a PlayerSummary. Points are assigned here.
 toSummary :: CreditResolution -> PlayerState -> PlayerSummary
 toSummary res ps = PlayerSummary
     { summaryMinutes = playerMinutes ps
@@ -455,6 +493,17 @@ toSummary res ps = PlayerSummary
     earnedCredit = counterToCredit res (playerMinutes ps)
     broughtCarryover = playerCarryover ps
 
+-- Formats minutes for display in the CSV output.
+formatMinutes :: Int -> String
+formatMinutes m = formatTime defaultTimeLocale "%h:%M"
+    (secondsToNominalDiffTime (60 * fromIntegral m))
+
+-- Makes CSV rows from the player summaries.
+-- The fields are:
+-- track, racer, carryover from earlier races,
+-- minutes at PTB positions (one field per position),
+-- total stunts minutes earned, carryover to the next race,
+-- points earned.
 summariesToCsvRecords :: Map Track (Map Player PlayerSummary) -> [Csv.Record]
 summariesToCsvRecords =  map makeRecord
     . concat . fmap sequenceA
@@ -483,6 +532,7 @@ summariesToCsvRecords =  map makeRecord
         , Csv.toField (summaryPoints su)
         ]
 
+-- Header row for the CSV output.
 summaryHeader :: Csv.Header
 summaryHeader = Csv.record . map Csv.toField $
     [ "Track"
@@ -496,6 +546,8 @@ summaryHeader = Csv.record . map Csv.toField $
     , "Points"
     ]
 
+-- Invoke on GHCi with:
+-- :main "/path/to/replays.csv"
 main :: IO ()
 main = do
     rpls <- getArgs >>= readAllReplays . \case
