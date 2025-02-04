@@ -28,6 +28,17 @@ import Control.Monad
 import Data.Maybe
 import System.Environment
 
+-- Constants defined across this file which can be adjusted to tune the
+-- system:
+--
+-- - ptbFactor: Conversion between real and stunts minutes.
+-- - ptbEarningRange: Positions to consider for PTB.
+-- - chosenResolution: How to round earned minutes.
+-- - grantPlusHalf: Whether to have PTB +0.5.
+-- - hoursForPlusOne: Hours for PTB +1 (the base earning rate).
+--
+-- Ideally, all of them would be proper configurable parameters.
+
 -- The window in a race within which replays count for PTB.
 data BonusWindow = BonusWindow
     { windowStart :: !LocalTime
@@ -35,10 +46,8 @@ data BonusWindow = BonusWindow
     }
     deriving Show
 
--- Player identifier. Just a synonym of Text for now.
+-- Player and track identifiers. Mere synonyms of Text for now.
 type Player = Text
-
--- Track identifier. Just a synonym of Text for now.
 type Track = Text
 
 -- Sets up bonus windows from a CSV with fields:
@@ -64,11 +73,18 @@ readBonusWindows csvPath = do
                     ws)
             Map.empty
 
+-- Various time counts expressed as integers. Just synonyms of Int for
+-- now.
+type RMin = Int  -- Real minutes.
+type SMin = Int  -- Stunts Minutes.
+type Credit = Int  -- PTB credit.
+type Hsec = Int  -- Hundredths of a second (for lap times)
+
 -- Relevant information about a replay.
 data ReplayInfo = ReplayInfo
     { replayTrack :: !Track
     , replayPlayer :: !Player
-    , correctedHsec :: !Int
+    , correctedHsec :: !Hsec
     , submittedOn :: !LocalTime
     , visibility :: !Text
     }
@@ -192,20 +208,20 @@ nPTB = length ptbEarningRange
 -- stored after being rounded down from seconds, which is why Int is
 -- used instead of NominalDiffTime. Note that any further rounding down
 -- to hours or stunts hours is not applied here.
-type MinutesCounter = Seq Int
+type MinutesCounter = Seq RMin
 
 initialMinutesCounter :: MinutesCounter
 initialMinutesCounter = Seq.replicate nPTB 0
 
 -- Get minutes from a counter at the position given by a PTBPos.
-getMinutesAt :: PTBPos -> MinutesCounter -> Int
+getMinutesAt :: PTBPos -> MinutesCounter -> RMin
 getMinutesAt pos counter = case pos of
     PTBNth -> 0
     PTBAbsent -> 0
     _ -> counter `Seq.index` fromEnum pos
 
 -- Add minutes to a counter at the position given by a PTBPos.
-addMinutesAt :: PTBPos -> Int -> MinutesCounter -> MinutesCounter
+addMinutesAt :: PTBPos -> RMin -> MinutesCounter -> MinutesCounter
 addMinutesAt pos mins counter = case pos of
     PTBNth -> counter
     PTBAbsent -> counter
@@ -215,7 +231,7 @@ addMinutesAt pos mins counter = case pos of
 data PlayerState = PlayerState
     { playerPTBPos :: !PTBPos
     , playerMinutes :: MinutesCounter
-    , playerCarryover :: !Int
+    , playerCarryover :: !Credit
     , playerLastUpdate :: !LocalTime
     }
     deriving Show
@@ -250,14 +266,14 @@ chosenResolution :: CreditResolution
 chosenResolution = SMinRes
 
 -- Earned real minutes given two consecutive update times.
-earnedMinutes :: LocalTime -> LocalTime -> Int
+earnedMinutes :: LocalTime -> LocalTime -> RMin
 earnedMinutes prevUpd currUpd = floor (secondsElapsed / 60)
     where
     secondsElapsed = nominalDiffTimeToSeconds (diffLocalTime currUpd prevUpd)
 
 -- Converts real minutes to stunts minutes. Stronger types here might be
 -- nice to have.
-toStuntsMinutes :: PTBPos -> Int -> Int
+toStuntsMinutes :: PTBPos -> RMin -> SMin
 toStuntsMinutes pos mins = case ptbFactor pos of
     Just factor -> mins `div` factor
     Nothing -> 0
@@ -266,16 +282,16 @@ toStuntsMinutes pos mins = case ptbFactor pos of
 -- by ptbFactor to convert to other positions. The least common multiple
 -- of the possible factors and 60. For instance, if the possible factors
 -- are 1, 2, 3, 5, 8 and 13, creditPerLeadHour is 1560.
-creditPerLeadHour :: Int
+creditPerLeadHour :: Credit
 creditPerLeadHour = foldl' lcm 60 $
     max 1 . fromMaybe 1 . ptbFactor <$> [minBound .. maxBound]
 
 -- Credit earned for each stunts minute (real minute in 1st place).
-creditPerLeadMinute :: Int
+creditPerLeadMinute :: Credit
 creditPerLeadMinute = creditPerLeadHour `div` 60
 
 -- Tally the credit for a minutes counter.
-counterToCredit :: CreditResolution -> MinutesCounter -> Int
+counterToCredit :: CreditResolution -> MinutesCounter -> Credit
 counterToCredit res counter = creditPerLeadMinute
     * foldl' (\acc pos -> acc + roundStuntsMins pos (getMinutesAt pos counter))
         0 ptbEarningRange
@@ -293,7 +309,7 @@ grantPlusHalf = True
 -- Credit for PTB +0.5. If grantPlusHalf is false, this will be equal to
 -- plusOneThreshold, and the PTB +0.5 step will, in effect, be skipped.
 -- plusOneThreshold.
-plusHalfThreshold :: Int
+plusHalfThreshold :: Credit
 plusHalfThreshold = plusOneThreshold
     `div` (if grantPlusHalf then 2 else 1)
 
@@ -304,15 +320,15 @@ hoursForPlusOne = 264
 
 -- Credit for PTB +1. This is where changes to the point earning
 -- should be done. An even number of hours multiplier is preferred.
-plusOneThreshold :: Int
+plusOneThreshold :: Credit
 plusOneThreshold = creditPerLeadHour * hoursForPlusOne
 
 -- Credit for PTB +2.
-plusTwoThreshold :: Int
+plusTwoThreshold :: Credit
 plusTwoThreshold = plusOneThreshold * 2
 
 -- Converts credit to points.
-creditToPoints :: Int -> Double
+creditToPoints :: Credit -> Double
 creditToPoints credit = min 2 (fromIntegral wholePoints + fracPoints)
     where
     (wholePoints, remainder) = credit `divMod` plusOneThreshold
@@ -322,7 +338,7 @@ creditToPoints credit = min 2 (fromIntegral wholePoints + fracPoints)
 
 -- Calculates the credit carryover for the next race, accounting for
 -- the point assignments.
-nextRaceCarryover :: CreditResolution -> PlayerState -> Int
+nextRaceCarryover :: CreditResolution -> PlayerState -> Credit
 nextRaceCarryover res ps
     -- The order of the guards is such that if plusOneThreshold and
     -- plusTwoThreshold are equal then the middle case becomes
@@ -480,9 +496,9 @@ refreshPlayerCredit st_pss updTime rpl = do
 -- A display-oriented distillation of PlayerState.
 data PlayerSummary = PlayerSummary
     { summaryMinutes :: MinutesCounter
-    , summaryPrevCarryover :: !Int
-    , summaryEarnedCredit :: !Int
-    , summaryNextCarryover :: !Int
+    , summaryPrevCarryover :: !Credit
+    , summaryEarnedCredit :: !Credit
+    , summaryNextCarryover :: !Credit
     , summaryPoints :: !Double
     }
     deriving Show
@@ -563,7 +579,7 @@ summaryHeader = Csv.record . map Csv.toField $
     , "Points"
     ]
 
--- Invoke on GHCi with:
+-- Invoke in GHCi with:
 -- :main "/path/to/replays.csv"
 main :: IO ()
 main = do
