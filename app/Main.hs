@@ -39,6 +39,7 @@ import Data.List
 import Data.Foldable
 import Control.Monad
 import Data.Maybe
+import Data.Functor
 import System.Environment
 
 -- Constants defined across this file which can be adjusted to tune the
@@ -593,29 +594,18 @@ summaryHeader = Csv.record . map Csv.toField $
     ]
 
 -- Invoke in GHCi with:
--- :main "/path/to/replays.csv"
+-- :main "/path/to/replays.csv" "/path/to/tracks.csv"
 main :: IO ()
 main = do
-    rpls <- getArgs >>= readAllReplays . \case
-        path : _ -> path
-        [] -> "data/results-2023.csv"
-    windows <- readBonusWindows "data/tracks.csv"
+    (rplCsvPath, trackCsvPath) <- getArgs <&> \case
+        r : t : _ -> (r, t)
+        [r] -> (r, "data/tracks.csv")
+        [] -> ("data/results-2024.csv", "data/tracks.csv")
+    rpls <- readAllReplays rplCsvPath
+    windows <- readBonusWindows trackCsvPath
     let foo = runPureEff $ execSimulator windows (processReplays rpls)
-    {-
-    print $
-        Map.filter ((0 <) . summaryPoints)
-        . fmap (toSummary chosenResolution)
-        $ foo Map.! "ZCT268"
-        -}
-    {-
-    print $
-        sortBy (comparing (Down . summaryPoints . snd))
-        . Map.assocs
-        . foldl' (Map.unionWith addSummaries) Map.empty
-        . map (fmap (toSummary chosenResolution))
-        $ Map.elems foo
-        -}
     BL.writeFile "test.csv" . Csv.encode $
         (summaryHeader :) . summariesToCsvRecords
         . fmap (fmap (toSummary chosenResolution))
         $ foo
+
