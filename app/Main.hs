@@ -256,7 +256,7 @@ plusHalfThreshold = plusOneThreshold `div` 2
 -- Credit for PTB +1. This is where changes to the point earning
 -- should be done. An even number of hours multiplier is preferred.
 plusOneThreshold :: Int
-plusOneThreshold = creditPerLeadHour * 240
+plusOneThreshold = creditPerLeadHour * 264
 
 -- Credit for PTB +2.
 plusTwoThreshold :: Int
