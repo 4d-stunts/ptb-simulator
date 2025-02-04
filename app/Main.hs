@@ -173,7 +173,13 @@ ptbFactor = \case
 
 -- Range from first up to the lowest PTB earning position.
 ptbEarningRange :: [PTBPos]
-ptbEarningRange = dropWhileEnd (isNothing . ptbFactor) [minBound .. maxBound]
+ptbEarningRange = [PTB1st .. PTB6th]
+-- This could have been made to automatically reflect the definition of
+-- ptbFactor:
+--
+-- ptbEarningRange = dropWhileEnd (isNothing . ptbFactor) [minBound .. maxBound]
+--
+-- That's probably too fussy, though.
 
 -- Highest PTB-earning position. For instance, it is 6 for a top 6 PTB
 -- system, and 1 for an LTB system.
