@@ -286,10 +286,16 @@ counterToCredit res counter = creditPerLeadMinute
         RHourRes -> toStuntsMinutes pos . (60 *) . (`div` 60)
         SHourRes -> (60 *) . (`div` 60) . toStuntsMinutes pos
 
--- Credit for PTB +0.5. To disable PTB +0.5, make it equal to
+-- Whether to have a PTB +0.5 step.
+grantPlusHalf :: Bool
+grantPlusHalf = True
+
+-- Credit for PTB +0.5. If grantPlusHalf is false, this will be equal to
+-- plusOneThreshold, and the PTB +0.5 step will, in effect, be skipped.
 -- plusOneThreshold.
 plusHalfThreshold :: Int
-plusHalfThreshold = plusOneThreshold `div` 2
+plusHalfThreshold = plusOneThreshold
+    `div` (if grantPlusHalf then 2 else 1)
 
 -- Credit for PTB +1. This is where changes to the point earning
 -- should be done. An even number of hours multiplier is preferred.
