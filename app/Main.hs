@@ -189,8 +189,7 @@ fromPTBPos = \case
     pos -> Just $! fromEnum pos + 1
 
 -- Conversion factor for real hours needed to earn credit, or "stunts
--- hours". This function ultimately determines the range of positions
--- considered in the PTB system.
+-- hours".
 ptbFactor :: PTBPos -> Maybe Int
 ptbFactor = \case
     PTB1st -> Just 1
