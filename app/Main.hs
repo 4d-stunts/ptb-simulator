@@ -8,6 +8,7 @@ build-depends: base ^>= 4.18.2.0
              , text
              , bytestring
              , time
+             , tz
 default-language: GHC2021
 -}
 {- project:
@@ -29,6 +30,8 @@ import qualified Data.Csv as Csv
 import qualified Data.ByteString.Lazy as BL
 import Data.Vector (Vector)
 import Data.Time
+import qualified Data.Time.Zones as TZ
+import qualified Data.Time.Zones.All as TZ
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Sequence (Seq)
@@ -55,14 +58,18 @@ import System.Environment
 
 -- The window in a race within which replays count for PTB.
 data BonusWindow = BonusWindow
-    { windowStart :: !LocalTime
-    , quietDaysStart :: !LocalTime
+    { windowStart :: !UTCTime
+    , quietDaysStart :: !UTCTime
     }
     deriving Show
 
 -- Player and track identifiers. Mere synonyms of Text for now.
 type Player = Text
 type Track = Text
+
+-- Convert times to UTC using the ZakStunts time zone.
+zakTimeToUTC :: LocalTime -> UTCTime
+zakTimeToUTC = TZ.localTimeToUTCTZ (TZ.tzByLabel TZ.Europe__Budapest)
 
 -- Sets up bonus windows from a CSV with fields:
 -- track name, season, official start day, deadline day.
@@ -78,11 +85,12 @@ readBonusWindows csvPath = do
         Right v -> v & foldl'
             (\ws (name, _ :: String, start, end) ->
                 Map.insert name BonusWindow
-                    { windowStart = LocalTime (read start) midnight
+                    { windowStart = zakTimeToUTC $
+                        LocalTime (read start) midnight
                     -- Subtracting one day from 00:00 at the deadline
                     -- gives 00:00 at the beginning of quiet days.
-                    , quietDaysStart = addLocalTime (-nominalDay)
-                        (LocalTime (read end) midnight)
+                    , quietDaysStart = zakTimeToUTC $
+                        addLocalTime (-nominalDay) (LocalTime (read end) midnight)
                     }
                     ws)
             Map.empty
@@ -99,7 +107,7 @@ data ReplayInfo = ReplayInfo
     { replayTrack :: !Track
     , replayPlayer :: !Player
     , correctedHsec :: !Hsec
-    , submittedOn :: !LocalTime
+    , submittedOn :: !UTCTime
     , visibility :: !Text
     }
     deriving Show
@@ -123,7 +131,7 @@ readAllReplays csvPath = do
                 { replayTrack = track
                 , replayPlayer = name
                 , correctedHsec = hsec
-                , submittedOn = read sbmtOn
+                , submittedOn = zakTimeToUTC (read sbmtOn)
                 , visibility = vis
                 })
 
@@ -245,13 +253,13 @@ data PlayerState = PlayerState
     { playerPTBPos :: !PTBPos
     , playerMinutes :: MinutesCounter
     , playerCarryover :: !Credit
-    , playerLastUpdate :: !LocalTime
+    , playerLastUpdate :: !UTCTime
     }
     deriving Show
 
 -- PlayerState for a player whose state wasn't been tracked before the
 -- current replay.
-newPlayerState :: PTBPos -> LocalTime -> PlayerState
+newPlayerState :: PTBPos -> UTCTime -> PlayerState
 newPlayerState pos upd = PlayerState
     { playerPTBPos = pos
     , playerMinutes = initialMinutesCounter
@@ -279,10 +287,10 @@ chosenResolution :: CreditResolution
 chosenResolution = SMinRes
 
 -- Earned real minutes given two consecutive update times.
-earnedMinutes :: LocalTime -> LocalTime -> RMin
+earnedMinutes :: UTCTime -> UTCTime -> RMin
 earnedMinutes prevUpd currUpd = floor (secondsElapsed / 60)
     where
-    secondsElapsed = nominalDiffTimeToSeconds (diffLocalTime currUpd prevUpd)
+    secondsElapsed = nominalDiffTimeToSeconds (diffUTCTime currUpd prevUpd)
 
 -- Converts real minutes to stunts minutes. Stronger types here might be
 -- nice to have.
@@ -365,7 +373,7 @@ nextRaceCarryover res ps
 
 -- Prepares a PlayerState for the next race. Carryover is calculated
 -- here, based on the state at the end of the previous race.
-nextRacePlayerState :: CreditResolution -> LocalTime -> PlayerState -> PlayerState
+nextRacePlayerState :: CreditResolution -> UTCTime -> PlayerState -> PlayerState
 nextRacePlayerState res startTime ps = ps
     { playerPTBPos = PTBAbsent
     , playerMinutes = initialMinutesCounter
@@ -466,8 +474,8 @@ processReplays rpls (Simulator rd_wnd wt_pss st_sb st_pss) = do
 updatePlayerState
     :: st_pss :> es
     => State (Map Player PlayerState) st_pss
-    -> LocalTime  -- ^ Submission time from the replay that triggered
-                  --   the update.
+    -> UTCTime  -- ^ Submission time from the replay that triggered
+                --   the update.
     -> (Int, ReplayInfo)
     -> Eff es ()
 updatePlayerState st_pss updTime (nPos, rpl) = do
@@ -491,7 +499,7 @@ updatePlayerState st_pss updTime (nPos, rpl) = do
 refreshPlayerCredit
     :: st_pss :> es
     => State (Map Player PlayerState) st_pss
-    -> LocalTime  -- ^ Update time.
+    -> UTCTime    -- ^ Update time.
     -> ReplayInfo
     -> Eff es ()
 refreshPlayerCredit st_pss updTime rpl = do
